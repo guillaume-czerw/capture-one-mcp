@@ -10,6 +10,8 @@ export interface VariantFilter {
   colorTags?: number[];
   pick?: boolean;
   nameContains?: string;
+  /** Match any of these endings of the variant name, or of name.extension. */
+  nameEndsWith?: string[];
   extensions?: string[];
 }
 
@@ -29,6 +31,8 @@ export interface VariantSummary {
   colorTag: number;
   extension: string;
   pick: boolean;
+  /** Position among the image's variants; 1 is the picked (primary) variant. */
+  positionInStack: number | null;
   selected: boolean;
   [extra: string]: unknown;
 }
@@ -42,6 +46,9 @@ export interface ListVariantsResult {
   returned: number;
   offset: number;
   truncated: boolean;
+  /** With nameEndsWith: how many distinct image names each ending matched.
+   * More than one means the ending is ambiguous (e.g. "17" matches 0017 and 0117). */
+  nameEndsWithMatches?: { suffix: string; imageNames: number }[];
   variants: VariantSummary[];
 }
 
@@ -70,9 +77,15 @@ export async function listVariants(input: ListVariantsInput): Promise<ListVarian
   // Extensions are compared lower-case and without the dot. Callers naturally
   // write "NEF" or ".jpg", which matched nothing at all and read as "no such
   // images" rather than as a formatting mismatch.
-  const filter = input.filter?.extensions
+  let filter = input.filter?.extensions
     ? { ...input.filter, extensions: input.filter.extensions.map((e) => e.trim().toLowerCase().replace(/^\./, "")) }
     : input.filter;
+  // Endings are compared composed and lower-case; blanks would match everything.
+  if (filter?.nameEndsWith) {
+    const endings = filter.nameEndsWith.map((s) => s.trim().normalize("NFC").toLowerCase());
+    if (!endings.length || endings.some((s) => !s)) throw new Error("name_ends_with entries must be nonempty.");
+    filter = { ...filter, nameEndsWith: endings };
+  }
   return runJxa<ListVariantsResult>(
     `
     const doc = requireDoc();
@@ -150,6 +163,7 @@ export async function listVariants(input: ListVariantsInput): Promise<ListVarian
     const ratings = readAll(["rating"], 0);
     const colorTags = readAll(["colorTag"], 0);
     const picks = readAll(["pick"], false);
+    const positions = readAll(["position"], null);
     const selecteds = readAll(["selected"], false);
     // Variant name carries no extension and is NOT unique -- a RAW+JPEG pair
     // yields two variants both named e.g. "DSC_1950". Extension is what makes
@@ -159,6 +173,7 @@ export async function listVariants(input: ListVariantsInput): Promise<ListVarian
     const totalInScope = ids.length;
     const f = args.filter || {};
     const rows = [];
+    const endingNames = f.nameEndsWith ? f.nameEndsWith.map(function () { return {}; }) : null;
 
     for (let i = 0; i < totalInScope; i++) {
       const name = String(names[i] == null ? "" : names[i]);
@@ -172,6 +187,16 @@ export async function listVariants(input: ListVariantsInput): Promise<ListVarian
       if (f.pick != null && Boolean(picks[i]) !== f.pick) continue;
       if (f.nameContains && name.normalize("NFC").toLowerCase().indexOf(String(f.nameContains).normalize("NFC").toLowerCase()) === -1) continue;
       if (f.extensions != null && f.extensions.indexOf(ext) === -1) continue;
+      if (endingNames) {
+        const plain = name.normalize("NFC").toLowerCase();
+        const full = plain + "." + ext;
+        let hit = false;
+        for (let s = 0; s < f.nameEndsWith.length; s++) {
+          const e = f.nameEndsWith[s];
+          if (plain.slice(-e.length) === e || full.slice(-e.length) === e) { endingNames[s][plain] = true; hit = true; }
+        }
+        if (!hit) continue;
+      }
 
       rows.push({
         index: i,
@@ -181,6 +206,7 @@ export async function listVariants(input: ListVariantsInput): Promise<ListVarian
         rating: rating,
         colorTag: colorTag,
         pick: Boolean(picks[i]),
+        positionInStack: positions[i] == null ? null : Number(positions[i]),
         selected: Boolean(selecteds[i]),
       });
     }
@@ -329,6 +355,9 @@ export async function listVariants(input: ListVariantsInput): Promise<ListVarian
       returned: page.length,
       offset: args.offset,
       truncated: args.offset + page.length < matched,
+      ...(endingNames ? { nameEndsWithMatches: f.nameEndsWith.map(function (s, k) {
+        return { suffix: s, imageNames: Object.keys(endingNames[k]).length };
+      }) } : {}),
       variants: page,
     };
     `,

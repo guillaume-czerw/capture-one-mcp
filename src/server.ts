@@ -302,8 +302,9 @@ export function createServer(config: ServerConfig = loadConfig()): McpServer {
     "co_list_variants",
     "read",
     "List variants (the editable instances of images) with filtering and pagination. This is " +
-      "the main way to find images. Filter by rating, color tag, pick flag, filename or " +
-      "extension; request extra field groups only when needed, since those cost a round trip " +
+      "the main way to find images. Filter by rating, color tag, pick flag, filename (contains or " +
+      "ends with) or extension. Each row's positionInStack is 1 for the image's primary (picked) " +
+      "variant; clones share its name. Request extra field groups only when needed, since those cost a round trip " +
       "per variant.",
     {
       scope: z
@@ -327,6 +328,17 @@ export function createServer(config: ServerConfig = loadConfig()): McpServer {
         .describe("Match any of these color tag indices (0 = none)"),
       pick: z.boolean().optional().describe("Filter on the pick flag"),
       name_contains: z.string().optional(),
+      name_ends_with: z
+        .array(z.string().min(1))
+        .min(1)
+        .optional()
+        .describe(
+          "Match names ending with ANY of these, e.g. ['17','39','45'] for dictated file numbers; " +
+            "case-insensitive, may include the extension ('0039.arw'). The result's " +
+            "nameEndsWithMatches counts distinct image names per ending: more than one means the " +
+            "ending is ambiguous (17 also matches 0117), so ask which image was meant before editing. " +
+            "Combine with pick: true to get only each image's primary variant.",
+        ),
       extensions: z
         .array(z.string())
         .optional()
@@ -348,6 +360,7 @@ export function createServer(config: ServerConfig = loadConfig()): McpServer {
           ...(a.color_tags !== undefined ? { colorTags: a.color_tags } : {}),
           ...(a.pick !== undefined ? { pick: a.pick } : {}),
           ...(a.name_contains !== undefined ? { nameContains: a.name_contains } : {}),
+          ...(a.name_ends_with !== undefined ? { nameEndsWith: a.name_ends_with } : {}),
           ...(a.extensions !== undefined ? { extensions: a.extensions } : {}),
         },
         fields: a.fields,

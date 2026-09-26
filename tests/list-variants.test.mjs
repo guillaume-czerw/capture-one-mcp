@@ -18,7 +18,7 @@ const rows = [
 const col = key => () => rows.map(r => r[key]);
 const variants = {
   id: col('id'), name: col('name'), rating: col('rating'), colorTag: col('colorTag'),
-  pick: () => rows.map(() => false), selected: () => rows.map(() => false),
+  pick: () => rows.map(() => false), position: () => rows.map(() => 1), selected: () => rows.map(() => false),
   parentImage: { extension: col('ext') },
 };
 // The document's variants are those of its current collection (Capture One's
@@ -96,4 +96,21 @@ test('document scope names the current collection it was limited to', async () =
   const r = await list();
   assert.deepEqual(r.currentCollection, { name: 'Five Stars', kind: 'smart album' });
   assert.match(r.scopeDescription, /limited by Capture One to the current collection 'Five Stars' \(smart album\)/);
+});
+
+test('name_ends_with matches any dictated ending, with or without the extension', async () => {
+  const r = await list({ nameEndsWith: ['1', ' 3 '] });
+  assert.deepEqual(r.variants.map(v => v.id), ['1', '2', '4']);
+  // The RAW+JPEG pair is one image name: an ending is ambiguous only when it
+  // matches several names, not several variants of one image.
+  assert.deepEqual(r.nameEndsWithMatches, [{ suffix: '1', imageNames: 1 }, { suffix: '3', imageNames: 1 }]);
+  assert.deepEqual((await list({ nameEndsWith: ['_2.NEF'] })).variants.map(v => v.id), ['3']);
+  assert.deepEqual((await list({ nameEndsWith: ['9'] })).nameEndsWithMatches, [{ suffix: '9', imageNames: 0 }]);
+  await assert.rejects(list({ nameEndsWith: ['  '] }), /nonempty/);
+});
+
+test('rows carry positionInStack, and no ending count without the filter', async () => {
+  const r = await list();
+  assert.ok(r.variants.every(v => v.positionInStack === 1));
+  assert.equal('nameEndsWithMatches' in r, false);
 });
