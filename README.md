@@ -6,7 +6,7 @@ An MCP server that drives **Capture One Pro** on macOS through its
 AppleScript/JXA scripting interface — sessions and catalogs, collections,
 variants, adjustments, layers, recipes and output.
 
-Status: **complete through Phase 5** — 43 tools. Reading and navigation, ratings
+Status: **complete through Phase 5** — 44 tools. Reading and navigation, ratings
 and metadata, the full adjustment surface, layers and masks including AI people
 masking, and output: recipes, processing with queue polling, import and batch
 rename, plus a non-destructive candidate/preview/compare workflow. Tethered
@@ -127,6 +127,7 @@ Editing tools, hidden unless `CAPTURE_ONE_MCP_ALLOW_WRITE=1`:
 | `co_create_candidates` | Clone variants into editable candidates, preserving existing edits |
 | `co_render_preview` | Render one variant to a bounded sRGB JPEG returned as an MCP image; optionally also saved to `output_path` (`return_image: false` for metadata only) |
 | `co_open_document` | Open a session or catalog by path |
+| `co_set_output_location` | Point the session's Output location at an existing folder — the fix when it reads `/????` and every scripted process fails with -43 |
 
 `co_process_variants` checks the effective recipe before submitting work. Recipes
 with `existing_files: overwrite` require `CAPTURE_ONE_MCP_ALLOW_DESTRUCTIVE=1`

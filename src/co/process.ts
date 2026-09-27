@@ -288,7 +288,21 @@ export async function processVariants(
       before[id] = keys;
     }
 
-    const processResult = co.process(targets, { recipe: recipeName });
+    // co.process can THROW rather than return an error string. The case seen on
+    // Capture One 16.8.6 (27/09/2026, session CUISTOTS MIGRATEURS): the session's
+    // Output location had become unreadable ("/????"), and every scripted process
+    // -- whatever the recipe was rooted at, image folder or custom location --
+    // failed with "Dossier de traitement non valide. (-43)", while the same recipe
+    // exported fine from the UI's Export dialog. The raw -43 said nothing useful,
+    // so a throw is inspected here: if the queue is still empty nothing was
+    // submitted, and the error names the document's Output location, which is the
+    // one setting every failing attempt had in common.
+    let processResult;
+    try {
+      processResult = co.process(targets, { recipe: recipeName });
+    } catch (e) {
+      throw new Error(explainProcessFailure(d, e));
+    }
     // The scripting dictionary returns errors as text, not necessarily as
     // exceptions. Validate acceptance before an empty queue can imply success.
     if (typeof processResult !== "string" || !processResult.trim()) {
@@ -488,7 +502,10 @@ export async function queueStatus(): Promise<unknown> {
 }
 
 export async function outputFiles(target: Target): Promise<unknown> {
-  return runJxa(
+  const res = await runJxa<{
+    variants: (Record<string, unknown> & { outputs: { path: string; date: string; stillExists?: boolean }[] })[];
+    notFound: string[];
+  }>(
     `
     const resolved = resolveTargets(args.target);
     const out = [];
@@ -499,11 +516,7 @@ export async function outputFiles(target: Target): Promise<unknown> {
       try {
         const evs = v.outputEvents();
         for (let e = 0; e < evs.length; e++) {
-          info.outputs.push({
-            path: String(evs[e].path()),
-            date: String(evs[e].date()),
-            stillExists: Boolean(evs[e].exists()),
-          });
+          info.outputs.push({ path: String(evs[e].path()), date: String(evs[e].date()) });
         }
       } catch (e) { info.outputsError = String(e); }
       out.push(info);
@@ -512,6 +525,16 @@ export async function outputFiles(target: Target): Promise<unknown> {
     `,
     { args: { target }, timeoutMs: 120_000 },
   );
+  // stillExists used to be the output EVENT's exists(), which is true for every
+  // event in the history: on 27/09/2026 it reported two exports under ~/Pictures
+  // as present when the folder held neither. Checked on disk instead.
+  const { lstat } = await import("node:fs/promises");
+  for (const v of res.variants) {
+    for (const o of v.outputs) {
+      o.stillExists = await lstat(o.path).then((st) => st.isFile(), () => false);
+    }
+  }
+  return res;
 }
 
 /**

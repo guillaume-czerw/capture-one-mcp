@@ -4,7 +4,7 @@ import { z } from "zod";
 import { CaptureOneError, documentLock, sameText } from "./jxa/bridge.js";
 import { healthCheck } from "./jxa/health.js";
 import { DEFAULT_MAX_TARGETS, isAllowed, loadConfig, type RiskLevel, type ServerConfig } from "./config.js";
-import { getDocument, listDocuments, openDocument } from "./co/documents.js";
+import { getDocument, listDocuments, openDocument, setOutputLocation } from "./co/documents.js";
 import { listCollections, setCurrentCollection } from "./co/collections.js";
 import { createCandidates } from "./co/candidates.js";
 import { compareVariants } from "./co/comparison.js";
@@ -296,6 +296,18 @@ export function createServer(config: ServerConfig = loadConfig()): McpServer {
       "displayed; no image data is touched.",
     { name_or_id: z.string().describe("Collection name (case-insensitive) or its id") },
     async ({ name_or_id }) => setCurrentCollection(name_or_id),
+  );
+
+  tool(
+    "co_set_output_location",
+    "data",
+    "Set the document's Output location (the session's Output folder) to an existing folder. " +
+      "Use it when co_get_document shows folders.output as '/????' or processing fails with -43 " +
+      "(invalid processing folder): Capture One refuses every scripted process while the Output " +
+      "location is unreadable, whatever folder the recipe targets. The folder must already exist. " +
+      "Reports the previous and the read-back value.",
+    { folder: z.string().describe("Absolute path of an existing folder, e.g. the session's _Output folder") },
+    async ({ folder }) => setOutputLocation(folder),
   );
 
   tool(

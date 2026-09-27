@@ -162,7 +162,19 @@ export async function renderPreview(options: PreviewOptions): Promise<PreviewRes
       // From here submission is uncertain, so the recipe is never removed on a
       // failure path -- deleting a recipe with work possibly queued against it
       // is the worse mistake.
-      const batch = co.process(resolved.targets, {recipe: args.recipeName});
+      //
+      // One exception: co.process itself throwing with the queue still empty.
+      // Then nothing was submitted, and keeping the recipe only leaks another
+      // "MCP Preview <uuid>" into the user's document -- three of them piled up
+      // in a client session on 27/09/2026, one per failed attempt.
+      let batch;
+      try {
+        batch = co.process(resolved.targets, {recipe: args.recipeName});
+      } catch (e) {
+        const why = explainProcessFailure(d, e);
+        if (why.indexOf("CO_MCP_REFUSED") === 0) { try { co.delete(r); } catch (e2) {} }
+        throw new Error(why);
+      }
       if (typeof batch !== "string" || !batch.trim() || /^ERROR/i.test(batch.trim()))
         throw new Error("Preview processing not confirmed: " + String(batch) + ". Inspect queue before retrying.");
       return {batchId: batch.trim()};
@@ -248,6 +260,11 @@ export async function renderPreview(options: PreviewOptions): Promise<PreviewRes
       `Retained recipe '${recipeName}' and folder '${folder}': the queue stayed empty but no job ` +
       "was ever observed and no preview file appeared, so the job may still be pending. Inspect " +
       "the processing queue before removing either.";
+  } else if (failure && /Nothing was queued\./.test(String((failure as Error)?.message ?? failure))) {
+    // co.process threw with an empty queue: the start script already deleted
+    // the private recipe, so the temp folder is the only thing left to remove.
+    await rm(folder, {recursive:true, force:true}).catch(() => {});
+    cleanupWarning = "Nothing was queued: the private recipe and the temp folder were removed.";
   } else {
     cleanupWarning =
       `Temp folder '${folder}' retained. If processing was submitted, recipe '${recipeName}' is ` +

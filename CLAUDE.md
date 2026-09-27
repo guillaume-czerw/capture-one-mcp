@@ -12,7 +12,7 @@ Most of the complexity in this repo exists because of that, not because of MCP.
 
 - Built against **Capture One 16.8.5.30** (`com.captureone.captureone16`).
   The vendored dictionary is `reference/CaptureOne-16.8.5.sdef`.
-- **42 tools**: 16 `read`, 2 `view`, 21 `data`, 3 `destructive`.
+- **44 tools** (see README for the table).
 - TypeScript, ESM, Node 20+, no runtime deps beyond `@modelcontextprotocol/sdk`
   and `zod`.
 

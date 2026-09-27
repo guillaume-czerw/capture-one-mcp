@@ -330,6 +330,33 @@ export async function runJxa<T>(body: string, options: RunOptions = {}): Promise
         return { id: String(v.id()), name: String(v.name()), extension: ext };
       }
 
+      // Turns a throw from co.process into an actionable message. Capture One
+      // 16.8.6 threw "Dossier de traitement non valide. (-43)" from EVERY
+      // scripted process -- private preview recipe rooted at a temp folder,
+      // recipe rooted at the image folder, recipe rooted at a custom folder that
+      // existed -- while the session's Output location read back as "/????".
+      // The UI's Export dialog exported the same recipe fine. The unreadable
+      // Output location is the one thing all failing attempts shared, so it is
+      // named when present. If the queue is still empty nothing was submitted,
+      // which is what CO_MCP_REFUSED promises (no "may have partially applied").
+      function explainProcessFailure(d, e) {
+        var raw = String(e).replace(/^Error:\\s*/, "");
+        var pending = null;
+        try { pending = d.jobs().length; } catch (e2) {}
+        var output = null;
+        try { output = String(d.output()); } catch (e3) {}
+        var outputBroken = !output || output === "missing value" || output === "undefined" || /\\?\\?\\?/.test(output);
+        var msg = "Capture One refused to process: " + raw + ".";
+        if (pending === 0) msg = "CO_MCP_REFUSED: " + msg + " Nothing was queued.";
+        else msg += " The processing queue could not be confirmed empty (" + pending + " job(s)); inspect it before retrying.";
+        if (outputBroken) {
+          msg += " The session's Output location is unreadable ('" + output + "'). Scripted processing fails " +
+            "with -43 (invalid processing folder) while it is, whatever folder the recipe itself targets. " +
+            "Set it with co_set_output_location, or in Capture One's Library tool (Output location).";
+        }
+        return msg;
+      }
+
       // Resolves an edit target -- explicit variant ids, or the app's current
       // selection -- to variant specifiers. Ids are read in one bulk event and
       // indexed, so resolving a few variants in a large catalog does not cost a

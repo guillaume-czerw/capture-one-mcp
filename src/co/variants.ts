@@ -368,6 +368,20 @@ export async function listVariants(input: ListVariantsInput): Promise<ListVarian
 /** Everything scriptable about a single variant: image/EXIF, adjustments,
  *  crop, lens correction, IPTC metadata, keywords, layers and output history. */
 export async function getVariant(id: string): Promise<Record<string, unknown>> {
+  const v = await getVariantRaw(id);
+  // The output event's exists() is true for every event in the history, even
+  // when the file is long gone; the disk is checked instead (see outputFiles).
+  const files = v["outputFiles"];
+  if (Array.isArray(files)) {
+    const { lstat } = await import("node:fs/promises");
+    for (const f of files as { path: string; exists?: boolean }[]) {
+      f.exists = await lstat(f.path).then((st) => st.isFile(), () => false);
+    }
+  }
+  return v;
+}
+
+async function getVariantRaw(id: string): Promise<Record<string, unknown>> {
   return runJxa<Record<string, unknown>>(
     `
     // resolveTargets indexes ids from ONE bulk read; the previous loop called
@@ -495,7 +509,7 @@ export async function getVariant(id: string): Promise<Record<string, unknown>> {
       }),
       outputFiles: safe(function () {
         return v.outputEvents().map(function (o) {
-          return { path: String(o.path()), date: String(o.date()), exists: Boolean(o.exists()) };
+          return { path: String(o.path()), date: String(o.date()) };
         });
       }),
     };

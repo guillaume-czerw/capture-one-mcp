@@ -112,3 +112,57 @@ export async function openDocument(path: string): Promise<DocumentSummary> {
   bindOpenedDocument(opened.id);
   return opened;
 }
+
+export interface OutputLocationResult {
+  requested: string;
+  before: string | null;
+  actual: string | null;
+  matched: boolean;
+  note?: string;
+}
+
+/**
+ * Sets the document's Output location (the session's "Output" folder).
+ *
+ * Why this exists: on 27/09/2026 a client session's Output location read back as
+ * "/????" (the folder it pointed to no longer resolved), and every scripted
+ * process -- previews included -- failed with -43 until it was reset. The only
+ * way out was a right-click in the Library tool; this makes it one call.
+ *
+ * The folder must already exist: Capture One stores whatever it is given, and a
+ * missing folder recreates exactly the broken state this is meant to fix.
+ */
+export async function setOutputLocation(folder: string): Promise<OutputLocationResult> {
+  const { isAbsolute } = await import("node:path");
+  const { realpath, stat } = await import("node:fs/promises");
+  if (typeof folder !== "string" || !isAbsolute(folder)) {
+    throw new Error("folder must be an absolute path.");
+  }
+  if (folder.includes("..")) throw new Error("folder must not contain '..'.");
+  const real = await realpath(folder).catch(() => null);
+  if (!real || !(await stat(real)).isDirectory()) {
+    throw new Error(`'${folder}' does not exist or is not a folder; create it first. Nothing was changed.`);
+  }
+  const res = await runJxa<{ before: string | null; actual: string | null; err: string | null }>(
+    `
+    const d = requireDoc();
+    let before = null;
+    try { before = String(d.output()); } catch (e) {}
+    let err = null;
+    try { d.output = Path(args.folder); } catch (e) { err = String(e).replace(/^Error:\\s*/, ""); }
+    let actual = null;
+    try { actual = String(d.output()); } catch (e) { err = err || "read-back failed: " + String(e); }
+    return { before: before, actual: actual, err: err };
+    `,
+    { args: { folder: real }, mutating: true, timeoutMs: 20_000 },
+  );
+  const strip = (p: string | null) => (p ?? "").replace(/\/+$/, "").normalize("NFC");
+  const matched = res.actual !== null && strip(res.actual) === strip(real);
+  return {
+    requested: real,
+    before: res.before,
+    actual: res.actual,
+    matched,
+    ...(res.err ? { note: res.err } : {}),
+  };
+}

@@ -292,7 +292,12 @@ export async function removeKeyword(target: Target, keyword: string): Promise<
 export async function setSelection(
   variantIds: string[],
   mode: "replace" | "add" | "remove",
-): Promise<{ selected: { id: string; name: string }[]; notFound: string[] }> {
+): Promise<{
+  selected: { id: string; name: string }[];
+  notFound: string[];
+  notSelected?: { id: string; name: string }[];
+  notSelectedReason?: string;
+}> {
   return runJxa(
     `
     const resolved = resolveTargets({ variantIds: args.variantIds });
@@ -311,8 +316,34 @@ export async function setSelection(
 
     const sel = co.selectedVariants();
     const out = [];
-    for (let i = 0; i < sel.length; i++) out.push({ id: String(sel[i].id()), name: String(sel[i].name()) });
-    return { selected: out, notFound: notFound };
+    const selectedIds = Object.create(null);
+    for (let i = 0; i < sel.length; i++) {
+      const id = String(sel[i].id());
+      selectedIds[id] = true;
+      out.push({ id: id, name: String(sel[i].name()) });
+    }
+    // Capture One only selects what the browser shows. On 27/09/2026 two unrated
+    // variants were asked for under an active "Note|★" filter: the call returned
+    // the other nine as selected, no notFound, and the two were silently missing
+    // from the export that followed. Resolved-but-unselected ids are reported,
+    // with the active filters, so "did less than asked" is never silent.
+    const notSelected = [];
+    if (args.mode !== "remove") {
+      for (let t = 0; t < targets.length; t++) {
+        const id = String(targets[t].id());
+        if (!selectedIds[id]) notSelected.push({ id: id, name: String(targets[t].name()) });
+      }
+    }
+    const result = { selected: out, notFound: notFound };
+    if (notSelected.length) {
+      let filters = [];
+      try { filters = d.filters().map(function (f) { return String(f); }); } catch (e) {}
+      result.notSelected = notSelected;
+      result.notSelectedReason = "Capture One selects only variants visible in the browser. " +
+        (filters.length ? "Active filters: " + filters.join(", ") + ". " : "") +
+        "Clear the filter, change the current collection, or make these variants match it, then retry.";
+    }
+    return result;
     `,
     { args: { variantIds, mode }, timeoutMs: 60_000, mutating: true },
   );
